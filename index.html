@@ -144,6 +144,18 @@
     flex-direction:column;align-items:center;justify-content:center;gap:14px;color:#fff;
   }
   #scan-processing.show{display:flex;}
+
+  #surtido-overlay{
+    position:fixed;inset:0;background:rgba(22,27,34,.55);z-index:130;display:none;
+    align-items:flex-end;justify-content:center;
+  }
+  #surtido-overlay.show{display:flex;}
+  #surtido-panel{
+    background:#fff;border-radius:16px 16px 0 0;padding:20px 18px calc(20px + env(safe-area-inset-bottom));
+    width:100%;max-width:520px;max-height:80vh;overflow-y:auto;
+  }
+  #surtido-rows .field-row{margin-bottom:8px;}
+  #surtido-rows input{margin:0;padding:9px 10px;font-size:15px;text-align:center;}
   #scan-processing div:last-child{font-family:var(--mono);font-size:13px;letter-spacing:.04em;}
   .spinner{
     width:38px;height:38px;border-radius:50%;border:3px solid rgba(255,255,255,.25);
@@ -336,6 +348,19 @@
   <div>Leyendo código…</div>
 </div>
 
+<!-- Panel de surtido: al escanear un código de referencia base, pedir cantidad por talla -->
+<div id="surtido-overlay">
+  <div id="surtido-panel">
+    <h2 id="surtido-title">Referencia</h2>
+    <div class="muted" id="surtido-sub" style="margin-bottom:12px;"></div>
+    <div id="surtido-rows"></div>
+    <div class="btn-row" style="margin-top:14px;">
+      <button class="btn btn-ghost" id="btn-surtido-cancel">Cancelar</button>
+      <button class="btn btn-primary" id="btn-surtido-add">Agregar surtido</button>
+    </div>
+  </div>
+</div>
+
 <script>
 (function(){
   "use strict";
@@ -463,6 +488,8 @@
   const REF_ALIASES = ['referencia','referenciaproducto','ref','sku'];
   const LISTA_ALIASES = ['lista','listaprecio','listadeprecio','codigoalterno','codigoalternolistaprecio','listaprecioproducto'];
   const VALOR_ALIASES = ['valor','preciounidad','preciounitario','valorproducto'];
+  const ARTICULO_ALIASES = ['codigo','código','articulo','codigoarticulo','codigobase'];
+  const TALLA_ALIASES = ['talla','talle','size'];
   // Columnas que NUNCA son una lista de precios, aunque queden numéricas.
   const KNOWN_META = ['codigo','referencia','descripcion','barras','color','talla','tipodeproducto',
     'linea','basicos','disenadora','coleccion','categoria','prenda','tipotejido','estado',
@@ -484,6 +511,8 @@
 
     const listaIdx = findCol(norm, LISTA_ALIASES);
     const valorIdx = findCol(norm, VALOR_ALIASES);
+    const articuloIdx = findCol(norm, ARTICULO_ALIASES);
+    const tallaIdx = findCol(norm, TALLA_ALIASES);
     const out = [];
 
     // Formato "largo": una columna de lista + una de valor (una fila por código+lista)
@@ -493,7 +522,11 @@
         const codigo = String(r[codeIdx]??'').trim();
         const referencia = String(r[refIdx]??'').trim();
         if(!codigo || !referencia) continue;
-        out.push({codigo, referencia, lista: (String(r[listaIdx]??'').trim())||'GENERAL', valor: parseMoney(r[valorIdx])});
+        out.push({
+          codigo, referencia, lista: (String(r[listaIdx]??'').trim())||'GENERAL', valor: parseMoney(r[valorIdx]),
+          articulo: articuloIdx!==-1 ? String(r[articuloIdx]??'').trim() : '',
+          talla: tallaIdx!==-1 ? String(r[tallaIdx]??'').trim() : ''
+        });
       }
       return out;
     }
@@ -522,13 +555,15 @@
       const codigo = String(r[codeIdx]??'').trim();
       const referencia = String(r[refIdx]??'').trim();
       if(!codigo || !referencia) continue;
+      const articulo = articuloIdx!==-1 ? String(r[articuloIdx]??'').trim() : '';
+      const talla = tallaIdx!==-1 ? String(r[tallaIdx]??'').trim() : '';
       if(!listColumns.length){
-        out.push({codigo, referencia, lista:'GENERAL', valor:0});
+        out.push({codigo, referencia, lista:'GENERAL', valor:0, articulo, talla});
         continue;
       }
       for(const col of listColumns){
         const valor = parseMoney(r[col.idx]);
-        if(valor>0) out.push({codigo, referencia, lista: col.name, valor});
+        if(valor>0) out.push({codigo, referencia, lista: col.name, valor, articulo, talla});
       }
     }
     return out;
@@ -949,9 +984,73 @@
       showToast('warn', matchAny.referencia, 'sin precio en "'+selectedLista+'"');
       return false;
     }
+    // ¿Es un código de referencia base (surtido)? Trae todas las tallas de ese artículo.
+    const surtidoRows = catalog.filter(c=>c.articulo && c.articulo===code && c.lista===selectedLista);
+    if(surtidoRows.length){
+      openSurtidoPanel(code, surtidoRows);
+      return true;
+    }
     showToast('warn', 'Código no encontrado', code);
     return false;
   }
+
+  const TALLA_ORDEN = ['XS','S','M','L','XL','XXL','XXXL','U','UNICA','ÚNICA'];
+  function ordenarTallas(a, b){
+    const na = Number(a), nb = Number(b);
+    if(!isNaN(na) && !isNaN(nb)) return na - nb;
+    const ia = TALLA_ORDEN.indexOf(a.toUpperCase());
+    const ib = TALLA_ORDEN.indexOf(b.toUpperCase());
+    if(ia!==-1 && ib!==-1) return ia - ib;
+    if(ia!==-1) return -1;
+    if(ib!==-1) return 1;
+    return a.localeCompare(b);
+  }
+
+  function openSurtidoPanel(articulo, rows){
+    // Una fila por talla (si hay varios colores para la misma talla, se usa el primero —
+    // el color específico se anota luego con el campo de observación de cada línea).
+    const porTalla = {};
+    rows.forEach(r=>{ if(!porTalla[r.talla||'—']) porTalla[r.talla||'—'] = r; });
+    const tallas = Object.keys(porTalla).sort(ordenarTallas);
+    document.getElementById('surtido-title').textContent = 'Referencia ' + articulo;
+    document.getElementById('surtido-sub').textContent = tallas.length + ' tallas disponibles · lista ' + selectedLista;
+    document.getElementById('surtido-rows').innerHTML = tallas.map(t=>`
+      <div class="field-row" style="align-items:center;">
+        <div style="flex:0 0 70px;font-weight:700;font-family:var(--mono);">${escapeHtml(t)}</div>
+        <div style="flex:1;">
+          <input type="number" min="0" value="0" data-talla="${escapeAttr(t)}" placeholder="0">
+        </div>
+      </div>
+    `).join('');
+    document.getElementById('surtido-panel').dataset.articulo = articulo;
+    document.getElementById('surtido-overlay').classList.add('show');
+  }
+
+  document.getElementById('btn-surtido-cancel').addEventListener('click', ()=>{
+    document.getElementById('surtido-overlay').classList.remove('show');
+  });
+
+  document.getElementById('btn-surtido-add').addEventListener('click', ()=>{
+    const articulo = document.getElementById('surtido-panel').dataset.articulo;
+    const rows = catalog.filter(c=>c.articulo===articulo && c.lista===selectedLista);
+    const porTalla = {};
+    rows.forEach(r=>{ if(!porTalla[r.talla||'—']) porTalla[r.talla||'—'] = r; });
+    let added = 0;
+    document.querySelectorAll('#surtido-rows input[data-talla]').forEach(input=>{
+      const cant = Math.max(0, Number(input.value)||0);
+      if(cant<=0) return;
+      const row = porTalla[input.dataset.talla];
+      if(!row) return;
+      cart.push({referencia:row.referencia, cantidad:cant, valor:row.valor, nota:''});
+      added++;
+    });
+    document.getElementById('surtido-overlay').classList.remove('show');
+    if(added){
+      renderCart();
+      debounceSaveDraft();
+      showToast('ok', 'Surtido agregado', added + (added===1?' talla':' tallas'));
+    }
+  });
 
   function showToast(type, title, sub){
     const t = document.getElementById('scan-toast');
