@@ -985,7 +985,15 @@
       return false;
     }
     // ¿Es un código de referencia base (surtido)? Trae todas las tallas de ese artículo.
-    const surtidoRows = catalog.filter(c=>c.articulo && c.articulo===code && c.lista===selectedLista);
+    // Ignora ceros extra a la izquierda: un EAN-13 generado para un código corto
+    // (ej. "1510960") suele rellenarse con ceros para completar 13 dígitos.
+    const codeNum = /^\d+$/.test(code) ? code.replace(/^0+/, '') : code;
+    const surtidoRows = catalog.filter(c=>{
+      if(!c.articulo || c.lista!==selectedLista) return false;
+      if(c.articulo === code) return true;
+      const articuloNum = /^\d+$/.test(c.articulo) ? c.articulo.replace(/^0+/, '') : c.articulo;
+      return articuloNum === codeNum && codeNum !== '';
+    });
     if(surtidoRows.length){
       openSurtidoPanel(code, surtidoRows);
       return true;
