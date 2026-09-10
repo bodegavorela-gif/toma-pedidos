@@ -289,7 +289,7 @@
 
       <button class="btn btn-ghost" id="btn-clear">Vaciar pedido</button>
       <br><br>
-      <button class="btn btn-primary" id="btn-export" disabled>Generar Excel para Saya</button>
+      <button class="btn btn-primary" id="btn-export" disabled>Generar y compartir pedido</button>
     </section>
 
     <!-- CATALOGO -->
@@ -321,13 +321,13 @@
     <!-- HISTORIAL -->
     <section class="view" id="view-historial">
       <div id="hist-list">
-        <div class="muted" style="padding:8px 2px;">Aquí quedan los pedidos que generes mientras tengas esta pestaña abierta.</div>
+        <div class="muted" style="padding:8px 2px;">Aquí quedan guardados los pedidos que generes en este celular.</div>
       </div>
     </section>
 
   </main>
 
-  <div class="footer-note">Cada Excel se descarga directo a tu celular — súbelo a Saya cuando quieras.</div>
+  <div class="footer-note">Cada pedido se puede compartir directo (WhatsApp, correo…) o queda descargado en tu celular.</div>
 </div>
 
 <!-- SCANNER: video en vivo (funciona en hosting real, fuera del iframe de Claude) -->
@@ -412,13 +412,28 @@
 
   const money = n => "$" + Math.round(Number(n)||0).toLocaleString("es-CO");
 
-  // ---------- Estado en memoria (sin cuentas ni almacenamiento persistente) ----------
-  // Nada de esto necesita sesión de Claude: el catálogo va embebido en el archivo,
-  // y el pedido/historial viven solo mientras la pestaña está abierta.
-  let historial = [];
+  // ---------- Almacenamiento local (ahora sí persiste: la app corre fuera de Claude) ----------
+  function lsGet(key, fallback){
+    try{ const v = localStorage.getItem(key); return v!==null ? JSON.parse(v) : fallback; }
+    catch(e){ return fallback; }
+  }
+  function lsSet(key, value){
+    try{ localStorage.setItem(key, JSON.stringify(value)); }catch(e){ /* almacenamiento lleno o no disponible */ }
+  }
 
+  let historial = lsGet('tp_historial', []);
+
+  let draftSaveTimer = null;
   function debounceSaveDraft(){
-    // Ya no hay nada que persistir: el pedido vive en memoria mientras la pestaña está abierta.
+    clearTimeout(draftSaveTimer);
+    draftSaveTimer = setTimeout(()=>{
+      lsSet('tp_draft', {
+        nit: document.getElementById('in-nit').value,
+        lista: selectedLista,
+        cart,
+        pendientes
+      });
+    }, 400);
   }
 
   // ---------- Tabs ----------
@@ -783,6 +798,7 @@
       pendientes = [];
       renderCart();
       renderPendientes();
+      lsSet('tp_draft', null);
     }
   });
 
@@ -820,7 +836,23 @@
     const now = new Date();
     const stamp = now.toISOString().slice(0,16).replace('T','_').replace(':','h');
     const filename = `pedido_${nit.replace(/[^a-zA-Z0-9-]/g,'')}_${stamp}.xlsx`;
-    XLSX.writeFile(wb, filename);
+
+    // Intenta compartir directo (WhatsApp, correo, Drive, lo que tenga el celular).
+    // Si el navegador no lo soporta (típico en computador), simplemente se descarga.
+    let compartido = false;
+    try{
+      const wbout = XLSX.write(wb, {bookType:'xlsx', type:'array'});
+      const file = new File([wbout], filename, {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+      if(navigator.canShare && navigator.canShare({files:[file]})){
+        await navigator.share({files:[file], title:'Pedido '+nit, text:'Pedido NIT '+nit+' — lista '+selectedLista});
+        compartido = true;
+      }
+    }catch(err){
+      if(err && err.name === 'AbortError'){ compartido = true; /* el vendedor canceló el share, no es un error */ }
+    }
+    if(!compartido){
+      XLSX.writeFile(wb, filename);
+    }
 
     const total = cart.reduce((a,b)=>a+b.cantidad*b.valor,0);
     const record = {
@@ -829,11 +861,15 @@
     };
     historial.unshift(record);
     historial = historial.slice(0,100);
+    lsSet('tp_historial', historial);
 
-    if(confirm('Excel generado y descargado. ¿Vaciar el pedido para empezar uno nuevo?')){
+    if(confirm('Pedido generado. ¿Vaciar el pedido para empezar uno nuevo?')){
       cart = [];
+      pendientes = [];
       document.getElementById('in-nit').value = '';
       renderCart();
+      renderPendientes();
+      lsSet('tp_draft', null);
     }
   });
 
@@ -841,7 +877,7 @@
   function renderHistory(){
     const el = document.getElementById('hist-list');
     if(!historial.length){
-      el.innerHTML = '<div class="muted" style="padding:8px 2px;">Aquí quedan los pedidos que generes mientras tengas esta pestaña abierta.</div>';
+      el.innerHTML = '<div class="muted" style="padding:8px 2px;">Aquí quedan guardados los pedidos que generes en este celular.</div>';
       return;
     }
     el.innerHTML = historial.map(h=>`
@@ -1090,6 +1126,18 @@
       renderCatalogStats();
       populateListaSelect();
       populateRefDatalist();
+    }
+    const draft = lsGet('tp_draft', null);
+    if(draft){
+      if(draft.nit) document.getElementById('in-nit').value = draft.nit;
+      if(draft.cart && draft.cart.length) cart = draft.cart;
+      if(draft.pendientes && draft.pendientes.length) pendientes = draft.pendientes;
+      if(draft.lista){
+        selectedLista = draft.lista;
+        document.getElementById('in-lista').value = draft.lista;
+      }
+      renderCart();
+      renderPendientes();
     }
     updateExportState();
   }
