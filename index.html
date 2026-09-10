@@ -1014,11 +1014,26 @@
     return a.localeCompare(b);
   }
 
-  function openSurtidoPanel(articulo, rows){
-    // Una fila por talla (si hay varios colores para la misma talla, se usa el primero —
-    // el color específico se anota luego con el campo de observación de cada línea).
+  // El código de color va "incrustado" en la referencia, entre el artículo y la talla
+  // (ej. 1510960 + SU + S = "1510960SUS"). "SU" es el color genérico de surtido.
+  function colorDeFila(r){
+    if(r.articulo && r.talla && r.referencia.startsWith(r.articulo) && r.referencia.endsWith(r.talla)){
+      return r.referencia.slice(r.articulo.length, r.referencia.length - r.talla.length);
+    }
+    return '';
+  }
+
+  function agruparPorTallaSurtido(rows){
+    // Prioriza el color genérico "SU" (surtido); si un artículo no lo tiene, usa lo que haya.
+    const surtido = rows.filter(r=>colorDeFila(r).toUpperCase().startsWith('SU'));
+    const base = surtido.length ? surtido : rows;
     const porTalla = {};
-    rows.forEach(r=>{ if(!porTalla[r.talla||'—']) porTalla[r.talla||'—'] = r; });
+    base.forEach(r=>{ if(!porTalla[r.talla||'—']) porTalla[r.talla||'—'] = r; });
+    return porTalla;
+  }
+
+  function openSurtidoPanel(articulo, rows){
+    const porTalla = agruparPorTallaSurtido(rows);
     const tallas = Object.keys(porTalla).sort(ordenarTallas);
     document.getElementById('surtido-title').textContent = 'Referencia ' + articulo;
     document.getElementById('surtido-sub').textContent = tallas.length + ' tallas disponibles · lista ' + selectedLista;
@@ -1041,8 +1056,7 @@
   document.getElementById('btn-surtido-add').addEventListener('click', ()=>{
     const articulo = document.getElementById('surtido-panel').dataset.articulo;
     const rows = catalog.filter(c=>c.articulo===articulo && c.lista===selectedLista);
-    const porTalla = {};
-    rows.forEach(r=>{ if(!porTalla[r.talla||'—']) porTalla[r.talla||'—'] = r; });
+    const porTalla = agruparPorTallaSurtido(rows);
     let added = 0;
     document.querySelectorAll('#surtido-rows input[data-talla]').forEach(input=>{
       const cant = Math.max(0, Number(input.value)||0);
