@@ -817,51 +817,62 @@
   }
 
   // ---------- Export to Excel (matches Saya "detalle" template) ----------
-  document.getElementById('btn-export').addEventListener('click', async ()=>{
-    const nit = document.getElementById('in-nit').value.trim();
-    if(!nit || !selectedLista || !cart.length) return;
-
+  function buildPedidoWorkbook(nit, lista, cartData){
     const data = [
       ["DETALLE MOVIMIENTO","","","",""],
       ["referenciaProducto","cantidadProducto","listaPrecioProducto","valorProducto","observacionProducto"],
       ["Referencia Producto","Cantidad Producto","Código Alterno Lista Precio","Valor Producto","Observación"],
-      ...cart.map(it=>[it.referencia, it.cantidad, selectedLista, it.valor, it.nota||''])
+      ...cartData.map(it=>[it.referencia, it.cantidad, lista, it.valor, it.nota||''])
     ];
     const ws = XLSX.utils.aoa_to_sheet(data);
     ws['!merges'] = [{s:{r:0,c:0}, e:{r:0,c:4}}];
     ws['!cols'] = [{wch:24},{wch:18},{wch:26},{wch:16},{wch:22}];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "detalle");
+    return wb;
+  }
 
-    const now = new Date();
-    const stamp = now.toISOString().slice(0,16).replace('T','_').replace(':','h');
-    const filename = `pedido_${nit.replace(/[^a-zA-Z0-9-]/g,'')}_${stamp}.xlsx`;
+  function nombreArchivoPedido(nit, fecha){
+    const stamp = fecha.toISOString().slice(0,16).replace('T','_').replace(':','h');
+    return `pedido_${nit.replace(/[^a-zA-Z0-9-]/g,'')}_${stamp}.xlsx`;
+  }
 
-    // Intenta compartir directo (WhatsApp, correo, Drive, lo que tenga el celular).
-    // Si el navegador no lo soporta (típico en computador), simplemente se descarga.
+  // Intenta compartir directo (WhatsApp, correo, Drive, lo que tenga el celular).
+  // Si el navegador no lo soporta (típico en computador), simplemente se descarga.
+  async function compartirOdescargarPedido(wb, filename, nit, lista){
     let compartido = false;
     try{
       const wbout = XLSX.write(wb, {bookType:'xlsx', type:'array'});
       const file = new File([wbout], filename, {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
       if(navigator.canShare && navigator.canShare({files:[file]})){
-        await navigator.share({files:[file], title:'Pedido '+nit, text:'Pedido NIT '+nit+' — lista '+selectedLista});
+        await navigator.share({files:[file], title:'Pedido '+nit, text:'Pedido NIT '+nit+' — lista '+lista});
         compartido = true;
       }
     }catch(err){
       if(err && err.name === 'AbortError'){ compartido = true; /* el vendedor canceló el share, no es un error */ }
     }
-    if(!compartido){
-      XLSX.writeFile(wb, filename);
-    }
+    if(!compartido) XLSX.writeFile(wb, filename);
+  }
+
+  document.getElementById('btn-export').addEventListener('click', async ()=>{
+    const nit = document.getElementById('in-nit').value.trim();
+    if(!nit || !selectedLista || !cart.length) return;
+
+    const now = new Date();
+    const filename = nombreArchivoPedido(nit, now);
+    const wb = buildPedidoWorkbook(nit, selectedLista, cart);
+    await compartirOdescargarPedido(wb, filename, nit, selectedLista);
 
     const total = cart.reduce((a,b)=>a+b.cantidad*b.valor,0);
     const record = {
       nit, lista:selectedLista, fecha: now.toISOString(),
-      items: cart.reduce((a,b)=>a+b.cantidad,0), total, filename
+      items: cart.reduce((a,b)=>a+b.cantidad,0), total, filename,
+      cart: cart.map(it=>({referencia:it.referencia, cantidad:it.cantidad, valor:it.valor, nota:it.nota||''}))
     };
     historial.unshift(record);
     historial = historial.slice(0,100);
     lsSet('tp_historial', historial);
+    renderHistory();
 
     if(confirm('Pedido generado. ¿Vaciar el pedido para empezar uno nuevo?')){
       cart = [];
@@ -880,13 +891,30 @@
       el.innerHTML = '<div class="muted" style="padding:8px 2px;">Aquí quedan guardados los pedidos que generes en este celular.</div>';
       return;
     }
-    el.innerHTML = historial.map(h=>`
+    el.innerHTML = historial.map((h,i)=>`
       <div class="hist-item">
         <div class="row1"><span>NIT ${escapeHtml(h.nit)}</span><span>${money(h.total)}</span></div>
         <div class="row2"><span>${new Date(h.fecha).toLocaleString('es-CO',{dateStyle:'medium',timeStyle:'short'})}</span><span>${h.items} ítems · ${escapeHtml(h.lista)}</span></div>
+        <button class="btn btn-outline btn-sm" style="width:100%;margin-top:9px;" data-hist-share="${i}">Compartir</button>
       </div>
     `).join('');
   }
+
+  document.getElementById('hist-list').addEventListener('click', async (e)=>{
+    const btn = e.target.closest('button[data-hist-share]');
+    if(!btn) return;
+    const record = historial[Number(btn.dataset.histShare)];
+    if(!record){ notify('No encontré los datos de ese pedido.'); return; }
+    if(!record.cart || !record.cart.length){ notify('Este pedido es de una versión anterior y no guardó los productos, así que no se puede volver a compartir.'); return; }
+    const original = btn.textContent;
+    btn.textContent = 'Preparando…';
+    try{
+      const wb = buildPedidoWorkbook(record.nit, record.lista, record.cart);
+      await compartirOdescargarPedido(wb, record.filename, record.nit, record.lista);
+    } finally {
+      btn.textContent = original;
+    }
+  });
 
   // ---------- Scanner: video en vivo primero; si falla, respaldo por foto ----------
   let scannerRunning = false;
