@@ -852,7 +852,7 @@
       } else if(!navigator.canShare({files:[file]})){
         motivo = 'El navegador dice que no puede compartir este archivo (canShare devolvió falso).';
       } else {
-        await navigator.share({files:[file], title:'Pedido '+nit, text:'Pedido NIT '+nit+' — lista '+lista});
+        await navigator.share({files:[file]});
         compartido = true;
       }
     }catch(err){
