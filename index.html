@@ -841,17 +841,28 @@
   // Si el navegador no lo soporta (típico en computador), simplemente se descarga.
   async function compartirOdescargarPedido(wb, filename, nit, lista){
     let compartido = false;
+    let motivo = '';
     try{
       const wbout = XLSX.write(wb, {bookType:'xlsx', type:'array'});
       const file = new File([wbout], filename, {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
-      if(navigator.canShare && navigator.canShare({files:[file]})){
+      if(!navigator.share){
+        motivo = 'Este navegador no tiene la función de compartir (navigator.share no existe).';
+      } else if(!navigator.canShare){
+        motivo = 'Este navegador no puede verificar si soporta compartir archivos (navigator.canShare no existe).';
+      } else if(!navigator.canShare({files:[file]})){
+        motivo = 'El navegador dice que no puede compartir este archivo (canShare devolvió falso).';
+      } else {
         await navigator.share({files:[file], title:'Pedido '+nit, text:'Pedido NIT '+nit+' — lista '+lista});
         compartido = true;
       }
     }catch(err){
       if(err && err.name === 'AbortError'){ compartido = true; /* el vendedor canceló el share, no es un error */ }
+      else motivo = 'navigator.share falló: ' + (err && (err.name||err.message) ? (err.name||'')+' '+(err.message||'') : err);
     }
-    if(!compartido) XLSX.writeFile(wb, filename);
+    if(!compartido){
+      if(motivo) notify('No se pudo abrir el menú de compartir, así que se descargó el archivo en su lugar.\n\nMotivo técnico: ' + motivo);
+      XLSX.writeFile(wb, filename);
+    }
   }
 
   document.getElementById('btn-export').addEventListener('click', async ()=>{
