@@ -353,6 +353,13 @@
   <div id="surtido-panel">
     <h2 id="surtido-title">Referencia</h2>
     <div class="muted" id="surtido-sub" style="margin-bottom:12px;"></div>
+    <div class="field-row" style="align-items:flex-end;margin-bottom:14px;padding-bottom:14px;border-bottom:1px dashed var(--line);">
+      <div style="flex:1;">
+        <label for="surtido-total" style="margin-bottom:5px;">Cantidad total (repartir pareja)</label>
+        <input type="number" min="0" id="surtido-total" placeholder="Ej: 12">
+      </div>
+      <button class="btn btn-outline btn-sm" id="btn-surtido-distribuir" style="flex:0 0 auto;height:44px;">Distribuir</button>
+    </div>
     <div id="surtido-rows"></div>
     <div class="btn-row" style="margin-top:14px;">
       <button class="btn btn-ghost" id="btn-surtido-cancel">Cancelar</button>
@@ -1116,13 +1123,27 @@
       <div class="field-row" style="align-items:center;">
         <div style="flex:0 0 70px;font-weight:700;font-family:var(--mono);">${escapeHtml(t)}</div>
         <div style="flex:1;">
-          <input type="number" min="0" value="0" data-talla="${escapeAttr(t)}" placeholder="0">
+          <input type="number" min="0" data-talla="${escapeAttr(t)}" placeholder="0">
         </div>
       </div>
     `).join('');
+    document.getElementById('surtido-total').value = '';
     document.getElementById('surtido-panel').dataset.articulo = articulo;
     document.getElementById('surtido-overlay').classList.add('show');
   }
+
+  document.getElementById('btn-surtido-distribuir').addEventListener('click', ()=>{
+    const total = Math.max(0, Math.floor(Number(document.getElementById('surtido-total').value)||0));
+    const inputs = document.querySelectorAll('#surtido-rows input[data-talla]');
+    if(total<=0 || !inputs.length) return;
+    const base = Math.floor(total / inputs.length);
+    let resto = total - base*inputs.length;
+    inputs.forEach(input=>{
+      let cant = base;
+      if(resto>0){ cant += 1; resto--; }
+      input.value = cant>0 ? cant : '';
+    });
+  });
 
   document.getElementById('btn-surtido-cancel').addEventListener('click', ()=>{
     document.getElementById('surtido-overlay').classList.remove('show');
