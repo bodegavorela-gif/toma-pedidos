@@ -867,7 +867,7 @@
       else motivo = 'navigator.share falló: ' + (err && (err.name||err.message) ? (err.name||'')+' '+(err.message||'') : err);
     }
     if(!compartido){
-      if(motivo) notify('No se pudo abrir el menú de compartir, así que se descargó el archivo en su lugar.\n\nMotivo técnico: ' + motivo);
+      if(motivo) console.warn('Compartir no disponible, se descargó en su lugar:', motivo);
       XLSX.writeFile(wb, filename);
     }
   }
