@@ -217,7 +217,6 @@
   <nav class="tabs">
     <button class="tab-btn active" data-tab="pedido">Pedido</button>
     <button class="tab-btn" data-tab="fotos">Fotos</button>
-    <button class="tab-btn" data-tab="catalogo">Catálogo</button>
     <button class="tab-btn" data-tab="historial">Historial</button>
   </nav>
 
@@ -316,32 +315,6 @@
         <input type="text" id="fotos-buscar" placeholder="Ej: 1003, blusa siza…">
       </div>
       <div id="fotos-resultados"></div>
-    </section>
-
-    <!-- CATALOGO -->
-    <section class="view" id="view-catalogo">
-      <div class="banner">
-        El catálogo relaciona cada código (EAN-13 o QR) con la referencia y su valor por lista de precios. Este archivo ya trae uno cargado. Si subes uno nuevo aquí, <b>solo se usa en este celular durante esta sesión</b> — para que quede igual en los demás celulares, pásame el archivo actualizado y te devuelvo la app con el catálogo nuevo ya incluido.
-      </div>
-      <div class="card">
-        <h2>Cargar catálogo</h2>
-        <label class="drop" id="drop-zone">
-          <div class="icon">⇪</div>
-          <div style="font-weight:700;font-size:14px;">Toca para subir archivo</div>
-          <div class="muted">.xlsx o .csv — columnas de código de barras y referencia, y una columna por cada lista de precios (o una columna "lista" + "valor")</div>
-          <input type="file" id="file-catalog" accept=".xlsx,.xls,.csv">
-        </label>
-        <div class="cat-stats" id="cat-stats" style="display:none;">
-          <div class="stat"><b id="stat-refs">0</b><span>Referencias</span></div>
-          <div class="stat"><b id="stat-codes">0</b><span>Códigos</span></div>
-          <div class="stat"><b id="stat-listas">0</b><span>Listas</span></div>
-        </div>
-        <div id="cat-empty-msg" class="muted" style="margin-top:10px;">No hay catálogo cargado todavía.</div>
-      </div>
-      <div class="card" id="card-listas" style="display:none;">
-        <h2>Listas de precios detectadas</h2>
-        <div id="listas-detected"></div>
-      </div>
     </section>
 
     <!-- HISTORIAL -->
@@ -628,53 +601,13 @@
     return out;
   }
 
-  document.getElementById('file-catalog').addEventListener('change', async (e)=>{
-    const file = e.target.files[0];
-    if(!file) return;
-    let rows;
-    try{
-      if(/\.csv$/i.test(file.name)){
-        const text = await file.text();
-        rows = parseCsvText(text);
-      } else {
-        const buf = await file.arrayBuffer();
-        const wb = XLSX.read(buf, {type:'array'});
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        rows = XLSX.utils.sheet_to_json(ws, {header:1, raw:true, defval:''});
-      }
-    }catch(err){
-      notify("No pude leer el archivo. Verifica que sea un .xlsx o .csv válido.");
-      return;
-    }
-    const parsed = parseCatalogRows(rows);
-    if(!parsed.length) return;
-    catalog = parsed;
-    renderCatalogStats();
-    populateListaSelect();
-    populateRefDatalist();
-  });
-
   function renderCatalogStats(){
-    const stats = document.getElementById('cat-stats');
-    const emptyMsg = document.getElementById('cat-empty-msg');
-    const cardListas = document.getElementById('card-listas');
     if(!catalog.length){
-      stats.style.display='none';
-      emptyMsg.style.display='block';
-      cardListas.style.display='none';
       document.getElementById('header-sub').textContent = 'sin catálogo cargado';
       return;
     }
     const refs = new Set(catalog.map(c=>c.referencia));
-    const codes = new Set(catalog.map(c=>c.codigo));
     const listas = [...new Set(catalog.map(c=>c.lista))];
-    document.getElementById('stat-refs').textContent = refs.size;
-    document.getElementById('stat-codes').textContent = codes.size;
-    document.getElementById('stat-listas').textContent = listas.length;
-    stats.style.display='flex';
-    emptyMsg.style.display='none';
-    cardListas.style.display='block';
-    document.getElementById('listas-detected').innerHTML = listas.map(l=>`<span class="pill" style="margin:2px 4px 2px 0;">${escapeHtml(l)}</span>`).join('');
     document.getElementById('header-sub').textContent = `${refs.size} referencias · ${listas.length} listas`;
   }
 
